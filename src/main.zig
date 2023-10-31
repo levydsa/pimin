@@ -22,7 +22,43 @@ pub fn Shader(comptime shader_type: ShaderType) type {
             CompilationFailed,
         };
 
+        pub const Parameter = enum(c.GLenum) {
+            shader_type = c.GL_SHADER_TYPE,
+            delete_status = c.GL_DELETE_STATUS,
+            compile_status = c.GL_COMPILE_STATUS,
+            info_log_length = c.GL_INFO_LOG_LENGTH,
+            shader_source_length = c.GL_SHADER_SOURCE_LENGTH,
+        };
+
         const log = std.log.scoped(.opengl);
+
+        pub fn iv(id: c.GLuint, p: Parameter) c.GLint {
+            var ret: c.GLint = undefined;
+            c.glGetShaderiv(id, @intFromEnum(p), &ret);
+            return ret;
+        }
+
+        pub fn infoLog(id: c.GLuint) void {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            defer std.debug.assert(gpa.deinit() == .ok);
+
+            var buffer: []u8 = gpa.allocator().alloc(u8, @intCast(iv(id, .info_log_length))) catch unreachable;
+            defer gpa.allocator().free(buffer);
+
+            var length: c.GLint = 0;
+
+            c.glGetShaderInfoLog(
+                id,
+                @intCast(buffer.len),
+                &length,
+                @ptrCast(buffer),
+            );
+
+            log.info("{s}: {s}\n", .{
+                std.enums.tagName(ShaderType, shader_type).?,
+                buffer,
+            });
+        }
 
         pub fn init(source: [:0]const u8) Error!Self {
             const id = c.glCreateShader(@intFromEnum(shader_type));
@@ -30,17 +66,14 @@ pub fn Shader(comptime shader_type: ShaderType) type {
             c.glShaderSource(id, 1, @ptrCast(&source), null);
             c.glCompileShader(id);
 
-            var compiled: c.GLint = undefined;
-            c.glGetShaderiv(id, c.GL_COMPILE_STATUS, &compiled);
-
-            if (compiled == c.GL_FALSE) {
-                var length: c_int = 0;
-                var buffer = [_]u8{0} ** 1024;
-
-                c.glGetShaderInfoLog(id, buffer.len, &length, @ptrCast(&buffer));
-                log.info("Shader: {s}\n", .{buffer[0..@intCast(length)]});
-
-                return Error.CompilationFailed;
+            // TODO: make iv return different types based on param, or separate into a bunch of functions.
+            if (!switch (iv(id, .compile_status)) {
+                c.GL_TRUE => true,
+                c.GL_FALSE => false,
+                else => unreachable,
+            }) {
+                infoLog(id);
+                return error.CompilationFailed;
             }
 
             return .{ .id = id };
@@ -53,7 +86,11 @@ const Program = struct {
     fragment: Shader(.fragment),
     vertex: Shader(.vertex),
 
-    pub const Error = error{ LinkageFailed, InvalidOperation, InvalidValue };
+    pub const Error = error{
+        LinkageFailed,
+        InvalidOperation,
+        InvalidValue,
+    };
 
     const Self = @This();
 
@@ -61,11 +98,9 @@ const Program = struct {
         c.glUseProgram(self.id);
     }
 
-    pub fn getAttribute(self: Self, name: [:0]const u8, comptime T: type) error{BadAttribute}!Attribute(T) {
+    pub fn getAttribute(self: Self, name: [:0]const u8, comptime T: type) ?Attribute(T) {
         const attribute = c.glGetAttribLocation(self.id, name);
-        if (attribute < 0) return error.BadAttribute;
-
-        return .{ .id = @intCast(attribute) };
+        return if (attribute < 0) null else .{ .id = @intCast(attribute) };
     }
 
     pub fn uniform(self: Self, uniforms: anytype) void {
@@ -74,38 +109,24 @@ const Program = struct {
             const id = c.glGetUniformLocation(self.id, @as([:0]const u8, field.name ++ "\x00"));
             const v = @field(uniforms, field.name);
 
-            switch (@typeInfo(field.type)) {
-                .Int => c.glUniform1i(id, v),
-                .Float => c.glUniform1f(id, v),
-                .Array => |Column| switch (@typeInfo(Column.child)) {
-                    .Int => switch (Column.len) {
-                        1 => c.glUniform1i(id, v[0]),
-                        2 => c.glUniform2i(id, v[0], v[1]),
-                        3 => c.glUniform3i(id, v[0], v[1], v[2]),
-                        4 => c.glUniform4i(id, v[0], v[1], v[2], v[3]),
-                        else => @compileError("Vector length not supported.")
-                    },
-                    .Float => switch (Column.len) {
-                        1 => c.glUniform1f(id, v[0]),
-                        2 => c.glUniform2f(id, v[0], v[1]),
-                        3 => c.glUniform3f(id, v[0], v[1], v[2]),
-                        4 => c.glUniform4f(id, v[0], v[1], v[2], v[3]),
-                        else => @compileError("Vector length not supported.")
-                    },
-                    .Array => |Row| {
-                        if (Row.child != f32) @compileError("Matrix must be f32, found " ++ @typeName(Row.child));
-                        if (Row.len != Column.len) @compileError("Matrix must be square");
+            switch (field.type) {
+                i32 => c.glUniform1i(id, v),
+                f32 => c.glUniform1f(id, v),
 
-                        switch (Row.len) {
-                            2 => c.glUniformMatrix2fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
-                            3 => c.glUniformMatrix3fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
-                            4 => c.glUniformMatrix4fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
-                            else => @compileError("Matrix length not supported.")
-                        }
-                    },
-                    else => @compileError("Expected f32, i32 or array")
-                },
-                else => @compileError("Expected f32, i32 or array."),
+                [1]i32, @Vector(1, i32) => c.glUniform1i(id, v[0]),
+                [2]i32, @Vector(2, i32) => c.glUniform2i(id, v[0], v[1]),
+                [3]i32, @Vector(3, i32) => c.glUniform3i(id, v[0], v[1], v[2]),
+                [4]i32, @Vector(4, i32) => c.glUniform4i(id, v[0], v[1], v[2], v[3]),
+
+                [1]f32, @Vector(1, f32) => c.glUniform1f(id, v[0]),
+                [2]f32, @Vector(2, f32) => c.glUniform2f(id, v[0], v[1]),
+                [3]f32, @Vector(3, f32) => c.glUniform3f(id, v[0], v[1], v[2]),
+                [4]f32, @Vector(4, f32) => c.glUniform4f(id, v[0], v[1], v[2], v[3]),
+
+                [2][2]f32 => c.glUniformMatrix2fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
+                [3][3]f32 => c.glUniformMatrix3fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
+                [4][4]f32 => c.glUniformMatrix4fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
+                else => @compileError(@typeName(field.type) ++ " not a valid uniform type."),
             }
         }
     }
@@ -178,15 +199,20 @@ pub fn Buffer(comptime target: BufferTarget) type {
             c.glBindBuffer(@intFromEnum(target), self.id);
         }
 
+        pub inline fn debind(_: Self) void {
+            c.glBindBuffer(@intFromEnum(target), 0);
+        }
+
         pub fn data(self: Self, comptime T: type, slice: []const T, usage: Usage) void {
             self.bind();
+            defer self.debind();
+
             c.glBufferData(@intFromEnum(target), @intCast(@sizeOf(T) * slice.len), slice.ptr, @intFromEnum(usage));
-            unbind(target);
         }
     };
 }
 
-pub inline fn unbind(target: BufferTarget) void {
+pub inline fn debind(target: BufferTarget) void {
     c.glBindBuffer(@intFromEnum(target), 0);
 }
 
@@ -200,16 +226,18 @@ const WindowDesc = struct {
     position: struct {
         x: c_int,
         y: c_int,
-    } = .{ .x = c.SDL_WINDOWPOS_UNDEFINED, .y = c.SDL_WINDOWPOS_UNDEFINED },
+    } = .{
+        .x = c.SDL_WINDOWPOS_UNDEFINED,
+        .y = c.SDL_WINDOWPOS_UNDEFINED,
+    },
     size: struct {
-        w: c_int,
-        h: c_int,
+        width: c_int,
+        height: c_int,
     },
     flags: u32 = 0,
 };
 
 pub fn Attribute(comptime T: type) type {
-
     const child, const length = blk: {
         switch (@typeInfo(T)) {
             .Struct => |Struct| {
@@ -240,8 +268,9 @@ pub fn Attribute(comptime T: type) type {
 
         pub fn buffer(self: Self, array: Buffer(.array)) void {
             array.bind();
+            defer array.debind();
+
             c.glVertexAttribPointer(self.id, length, enumFromType(child), c.GL_FALSE, @sizeOf(T), null);
-            unbind(.array);
         }
     };
 }
@@ -261,16 +290,24 @@ const DrawMode = enum(c.GLenum) {
 
 pub fn drawElements(mode: DrawMode, count: c_int, t: enum { u8, u16, u32 }, element: Buffer(.element)) void {
     element.bind();
+    defer element.debind();
+
     c.glDrawElements(@intFromEnum(mode), count, switch (t) {
         .u8 => c.GL_UNSIGNED_BYTE,
         .u16 => c.GL_UNSIGNED_SHORT,
         .u32 => c.GL_UNSIGNED_INT,
     }, null);
-    unbind(.element);
 }
 
 fn sdlCreateWindow(args: WindowDesc) ?*c.SDL_Window {
-    return c.SDL_CreateWindow(args.title, args.position.x, args.position.y, args.size.w, args.size.h, args.flags);
+    return c.SDL_CreateWindow(
+        args.title,
+        args.position.x,
+        args.position.y,
+        args.size.width,
+        args.size.height,
+        args.flags,
+    );
 }
 
 fn enumFromType(comptime T: type) c.GLenum {
@@ -296,7 +333,7 @@ pub fn main() !void {
 
     const win = sdlCreateWindow(.{
         .title = "Zig OpenGL",
-        .size = .{ .w = 500, .h = 500 },
+        .size = .{ .width = 500, .height = 500 },
         .flags = c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_ALLOW_HIGHDPI,
     }) orelse sdlFail("Failed to create window");
     defer c.SDL_DestroyWindow(win);
@@ -317,7 +354,7 @@ pub fn main() !void {
         \\
         \\void main() {
         \\    gl_Position = vec4(
-        \\        vec3(position /*+ vec2(cos(elapsed/5)*0.75, sin(elapsed/5)*0.75) */, 0.0) * 0.5 * matrix,
+        \\        vec3(position + vec2(cos(elapsed/5), sin(elapsed/5)) * 0.5, 0.0) * 0.5 * matrix,
         \\        1.0);
         \\    vcolor = vec4(uv, 0.0, 1.0);
         \\}
@@ -347,14 +384,14 @@ pub fn main() !void {
     defer pos.deinit();
     pos.data(f32, &[_]f32{ -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5 }, .static_draw);
 
-    const apos = try program.getAttribute("position", Position);
+    const apos = program.getAttribute("position", Position).?;
     apos.buffer(pos);
 
     const uv = Buffer(.array).init();
     defer uv.deinit();
     uv.data(f32, &[_]f32{ 0, 0, 1, 0, 0, 1, 1, 1 }, .static_draw);
 
-    const auv = try program.getAttribute("uv", Uv);
+    const auv = program.getAttribute("uv", Uv).?;
     auv.buffer(uv);
 
     apos.enable();
@@ -373,7 +410,7 @@ pub fn main() !void {
         c.glClearColor(0, 0, 0, 255);
         c.glClear(c.GL_COLOR_BUFFER_BIT);
 
-        const time = std.math.lossyCast(f32, timer.read()) / std.time.ns_per_s;
+        const time: f32 = std.math.lossyCast(f32, timer.read()) / std.time.ns_per_s;
         program.use();
         program.uniform(.{
             .elapsed = time,
