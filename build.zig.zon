@@ -2,5 +2,10 @@
     .name = "pinim",
     .version = "0.0.0",
 	.paths = .{ "" },
-    .dependencies = .{},
+    .dependencies = .{
+		.qoiz = .{
+			.url = "https://github.com/levydsa/qoiz/archive/refs/heads/master.tar.gz",
+			.hash = "1220227299cba6cfdaf68677b3564db2c3c296db36dc0e014878730497f91a496668",
+		}
+	},
 }
