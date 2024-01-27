@@ -5,7 +5,7 @@
     .dependencies = .{
 		.qoiz = .{
 			.url = "https://github.com/levydsa/qoiz/archive/refs/heads/master.tar.gz",
-			.hash = "1220227299cba6cfdaf68677b3564db2c3c296db36dc0e014878730497f91a496668",
+			.hash = "12207d0593531622ddc85ed7ce8fa190199e01073bb67044513db847b65f9c5ba01d",
 		}
 	},
 }

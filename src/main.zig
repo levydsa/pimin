@@ -18,7 +18,7 @@ pub fn main() !void {
     defer win.deinit();
 
     if (win.context() == null) sdl.fail("Failed to create glcontext");
-    if (sdl.c.SDL_GL_SetSwapInterval(1) < 0) sdl.fail("Failed to set Vsync");
+    sdl.vsync() catch sdl.fail("Failed to set Vsync");
 
     const vs = try gl.Shader(.vertex).init(
         \\#version 150 core
@@ -39,6 +39,7 @@ pub fn main() !void {
         \\    vcolor = vec4(uv, 0.0, 1.0);
         \\}
     );
+    defer vs.deinit();
 
     const fs = try gl.Shader(.fragment).init(
         \\#version 150 core
@@ -52,23 +53,25 @@ pub fn main() !void {
         \\    gl_FragColor = texture(tex, vcolor.xy); // * vcolor * (sin(elapsed*2)+1)/2;
         \\}
     );
+    defer vs.deinit();
 
     const program = try gl.Program.init(vs, fs);
+    defer program.deinit();
 
-    var file = @embedFile("zero.qoi");
+    const file = @embedFile("zero.qoi");
     var image = try qoi.Image(.rgba).init(gpa.allocator(), file);
 
     image.flipY();
     defer image.deinit();
 
-    gl.c.glEnable(gl.c.GL_BLEND);
+    gl.enable(.{ .blend = true });
     gl.c.glBlendFunc(gl.c.GL_SRC_ALPHA, gl.c.GL_ONE_MINUS_SRC_ALPHA);
 
-    const godspeed = try gl.Texture.init(.{
+    var texture = try gl.Texture.init(0, .{
         .filter = .{ .min = .linear, .mag = .linear },
         .image = &image,
     });
-    _ = godspeed;
+    defer texture.deinit();
 
     const index = gl.Buffer(.element).init();
     defer index.deinit();
@@ -99,6 +102,10 @@ pub fn main() !void {
     main: while (true) {
         while (sdl.pollEvent()) |e| switch (e) {
             .quit => break :main,
+            .keyup => |k| switch (k.keysym.sym) {
+                sdl.c.SDLK_ESCAPE => break :main,
+                else => {},
+            },
             else => {},
         };
 
@@ -112,7 +119,7 @@ pub fn main() !void {
         program.use();
         program.uniform(.{
             .elapsed = elapsed,
-            .tex = @as(i32, 0),
+            .tex = texture,
             .matrix = [3][3]f32{
                 .{ cos(elapsed), sin(elapsed), 0 },
                 .{ sin(elapsed), -cos(elapsed), 0 },

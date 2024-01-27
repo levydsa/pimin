@@ -29,6 +29,10 @@ pub fn pollEvent() ?Event {
     } else null;
 }
 
+pub fn vsync() error{FailedVsync}!void {
+    if (c.SDL_GL_SetSwapInterval(1) < 0) return error.FailedVsync; 
+}
+
 pub fn init() void {
     if (c.SDL_Init(c.SDL_INIT_VIDEO) < 0) unreachable;
 }

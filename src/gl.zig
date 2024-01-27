@@ -7,6 +7,7 @@ pub const c = @cImport({
 
 pub const Texture = struct {
     id: c.GLuint,
+    i: u32,
 
     pub const WrapType = enum (c.GLint) {
         clamp_to_edge = c.GL_CLAMP_TO_EDGE,
@@ -44,11 +45,26 @@ pub const Texture = struct {
         image: *Image(.rgba),
     };
 
-    pub fn init(options: TextureInitOptions) !Texture {
+    pub fn deinit(self: *Texture) void {
+        c.glDeleteTextures(1, &self.id);
+        self.id = undefined;
+    }
+
+    pub fn init(i: u32, options: TextureInitOptions) !Texture {
         var id: c.GLuint = undefined;
         c.glGenTextures(1, &id);
 
-        c.glActiveTexture(c.GL_TEXTURE0);
+        c.glActiveTexture(switch (i) {
+            0 => c.GL_TEXTURE0,
+            1 => c.GL_TEXTURE1,
+            2 => c.GL_TEXTURE2,
+            3 => c.GL_TEXTURE3,
+            4 => c.GL_TEXTURE4,
+            5 => c.GL_TEXTURE5,
+            6 => c.GL_TEXTURE6,
+            7 => c.GL_TEXTURE7,
+            else => return error.InvalidTextureNumber,
+        });
         c.glBindTexture(c.GL_TEXTURE_2D, id);
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, @intFromEnum(options.filter.min));
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, @intFromEnum(options.filter.mag));
@@ -69,6 +85,7 @@ pub const Texture = struct {
 
         return .{
             .id = id,
+            .i = i,
         };
     }
 };
@@ -110,6 +127,8 @@ pub fn Shader(comptime shader_type: ShaderType) type {
             defer std.debug.assert(gpa.deinit() == .ok);
 
             var buffer = gpa.allocator().alloc(u8, @intCast(iv(id, .info_log_length))) catch unreachable;
+            buffer = undefined;
+
             defer gpa.allocator().free(buffer);
 
             var length: c.GLint = 0;
@@ -143,6 +162,10 @@ pub fn Shader(comptime shader_type: ShaderType) type {
             }
 
             return .{ .id = id };
+        }
+
+        pub fn deinit(self: Self) void {
+            c.glDeleteShader(self.id);
         }
     };
 }
@@ -190,6 +213,7 @@ pub const Program = struct {
                 [2][2]f32 => c.glUniformMatrix2fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
                 [3][3]f32 => c.glUniformMatrix3fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
                 [4][4]f32 => c.glUniformMatrix4fv(id, 1, c.GL_FALSE, @ptrCast(&v)),
+                Texture => c.glUniform1i(id, @intCast(v.i)),
                 else => @compileError(@typeName(field.type) ++ " not a valid uniform type."),
             }
         }
@@ -222,6 +246,10 @@ pub const Program = struct {
             .fragment = fragment,
             .vertex = vertex,
         };
+    }
+
+    pub fn deinit(self: Program) void {
+        c.glDeleteProgram(self.id);
     }
 };
 
@@ -355,4 +383,40 @@ pub fn clearColor(r: f32, g: f32, b: f32, a: f32) void {
 
 pub fn clear() void {
     c.glClear(c.GL_COLOR_BUFFER_BIT);
+}
+
+pub const Caps = struct {
+    blend: bool = false,
+    cull_face: bool = false,
+    depth_test: bool = false,
+    dither: bool = false,
+    polygon_offset_fill: bool = false,
+    sample_alpha_to_coverage: bool = false,
+    sample_coverage: bool = false,
+    scissor_test: bool = false,
+    stencil_test: bool = false,
+};
+
+pub fn enable(caps: Caps) void {
+    if (caps.blend) c.glEnable(c.GL_BLEND);
+    if (caps.cull_face) c.glEnable(c.GL_CULL_FACE);
+    if (caps.depth_test) c.glEnable(c.GL_DEPTH_TEST);
+    if (caps.dither) c.glEnable(c.GL_DITHER);
+    if (caps.polygon_offset_fill) c.glEnable(c.GL_POLYGON_OFFSET_FILL);
+    if (caps.sample_alpha_to_coverage) c.glEnable(c.GL_SAMPLE_ALPHA_TO_COVERAGE);
+    if (caps.sample_coverage) c.glEnable(c.GL_SAMPLE_COVERAGE);
+    if (caps.scissor_test) c.glEnable(c.GL_SCISSOR_TEST);
+    if (caps.stencil_test) c.glEnable(c.GL_STENCIL_TEST);
+}
+
+pub fn disable(caps: Caps) void {
+    if (caps.blend) c.glDisable(c.GL_BLEND);
+    if (caps.cull_face) c.glDisable(c.GL_CULL_FACE);
+    if (caps.depth_test) c.glDisable(c.GL_DEPTH_TEST);
+    if (caps.dither) c.glDisable(c.GL_DITHER);
+    if (caps.polygon_offset_fill) c.glDisable(c.GL_POLYGON_OFFSET_FILL);
+    if (caps.sample_alpha_to_coverage) c.glDisable(c.GL_SAMPLE_ALPHA_TO_COVERAGE);
+    if (caps.sample_coverage) c.glDisable(c.GL_SAMPLE_COVERAGE);
+    if (caps.scissor_test) c.glDisable(c.GL_SCISSOR_TEST);
+    if (caps.stencil_test) c.glDisable(c.GL_STENCIL_TEST);
 }
