@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("OpenGL");
     exe.linkLibC();
 
-    exe.addModule("qoiz", b.dependency("qoiz", .{
+    exe.root_module.addImport("qoiz", b.dependency("qoiz", .{
         .target = target,
         .optimize = optimize,
     }).module("qoiz"));

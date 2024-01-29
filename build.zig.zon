@@ -1,11 +1,11 @@
 .{
     .name = "pinim",
     .version = "0.0.0",
-	.paths = .{ "" },
+    .paths = .{ "" },
     .dependencies = .{
-		.qoiz = .{
-			.url = "https://github.com/levydsa/qoiz/archive/refs/heads/master.tar.gz",
-			.hash = "12207d0593531622ddc85ed7ce8fa190199e01073bb67044513db847b65f9c5ba01d",
-		}
-	},
+        .qoiz = .{
+            .url = "https://github.com/levydsa/qoiz/archive/refs/heads/master.tar.gz",
+            .hash = "1220a8c590996ccf6e5c1de8cfbfc2a8bcf9c09a479075020190b591f4850da89f74",
+        }
+    },
 }
